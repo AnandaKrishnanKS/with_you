@@ -1,0 +1,390 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String    @id @default(uuid())
+  phone         String    @unique
+  email         String    @unique
+  passwordHash  String
+  name          String
+  role          String    // MEMBER, SUPPORTER, ADMIN
+  status        String    @default("ACTIVE") // ACTIVE, SUSPENDED, BANNED
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deletedAt     DateTime?
+
+  memberProfile    MemberProfile?
+  supporterProfile SupporterProfile?
+  payments         Payment[]
+  memberships      Membership[]
+  reviewsGiven     Review[]          @relation("MemberReviews")
+  notifications    Notification[]
+  reportsCreated   Report[]          @relation("ReporterUser")
+  reportsAgainst   Report[]          @relation("ReportedUser")
+  sosAlerts        SosAlert[]
+  consentRecords   ConsentRecord[]
+  auditLogs        AuditLog[]
+}
+
+model MemberProfile {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth           DateTime?
+  city                  String?
+  districtId            String?
+  district              District? @relation(fields: [districtId], references: [id])
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  membershipStatus      String    @default("INACTIVE") // INACTIVE, ACTIVE, EXPIRED
+  membershipExpiresAt   DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  bookings             Booking[]  @relation("MemberBookings")
+  conversations        Conversation[] @relation("MemberConversations")
+}
+
+model SupporterProfile {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dateOfBirth           DateTime?
+  gender                String?   // MALE, FEMALE, OTHER, PREFER_NOT_TO_SAY
+  address               String?
+  city                  String?
+  districtId            String?
+  district              District? @relation(fields: [districtId], references: [id])
+  languages             String    // JSON string array e.g. ["Malayalam", "English"]
+  shortBio              String?
+  photoUrl              String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  availabilityStatus    String    @default("OFFLINE") // ONLINE, OFFLINE
+  verificationStatus    String    @default("PENDING_REVIEW") // PENDING_REVIEW, APPROVED, REJECTED
+  rejectionReason       String?
+  reliabilityScore      Float     @default(100.0)
+  payoutDetails         String?   // Encrypted bank/UPI JSON
+  maxSessionLength      Int       @default(8) // Max consecutive hours
+  memberGenderPref      String    @default("ANY") // ANY, FEMALE_ONLY, MALE_ONLY
+  membershipStatus      String    @default("INACTIVE") // INACTIVE, ACTIVE, EXPIRED
+  membershipExpiresAt   DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  kycVerification       KycVerification?
+  services              SupporterService[]
+  availability          Availability[]
+  exceptions            AvailabilityException[]
+  bookings              Booking[] @relation("SupporterBookings")
+  payouts               Payout[]
+  reviews               Review[]  @relation("SupporterReviews")
+  conversations         Conversation[] @relation("SupporterConversations")
+}
+
+model KycVerification {
+  id              String            @id @default(uuid())
+  supporterId     String            @unique
+  supporter       SupporterProfile  @relation(fields: [supporterId], references: [id], onDelete: Cascade)
+  providerRef     String
+  last4Aadhaar    String
+  selfieUrl       String
+  livenessScore   Float             @default(99.5)
+  faceMatchScore  Float             @default(98.0)
+  status          String            @default("VERIFIED") // VERIFIED, REJECTED, PENDING
+  verifiedAt      DateTime?
+  rejectReason    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model Region {
+  id        String   @id @default(uuid())
+  code      String   @unique // e.g. KL
+  name      String   // e.g. Kerala
+  country   String   @default("IN") // e.g. IN
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  districts District[]
+  configs   RegionConfig[]
+}
+
+model RegionConfig {
+  id                           String   @id @default(uuid())
+  regionId                     String
+  region                       Region   @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  memberYearlyFee              Float    @default(199.0)
+  supporterYearlyFee            Float    @default(499.0)
+  hourlyBookingFee             Float    @default(399.0)
+  platformCommissionPercent    Float    @default(20.0)
+  currency                     String   @default("INR")
+  taxPercent                   Float    @default(18.0) // GST %
+  cancelFullRefundHours        Int      @default(24) // >24h full refund
+  cancelPartialRefundHours     Int      @default(2)  // 2-24h partial refund
+  cancelPartialRefundPercent   Float    @default(50.0) // 50% refund
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+}
+
+model District {
+  id        String   @id @default(uuid())
+  regionId  String
+  region    Region   @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  name      String   // e.g. Ernakulam
+  state     String   // e.g. Kerala
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberProfiles    MemberProfile[]
+  supporterProfiles SupporterProfile[]
+}
+
+model Service {
+  id           String   @id @default(uuid())
+  key          String   @unique // e.g. EMOTIONAL_SUPPORT
+  name         String
+  description  String
+  icon         String   // e.g. HeartHandshake
+  allowedModes String   // JSON array e.g. ["IN_PERSON", "VIDEO_CALL"]
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  supporterServices SupporterService[]
+  bookings          Booking[]
+}
+
+model SupporterService {
+  id          String           @id @default(uuid())
+  supporterId String
+  supporter   SupporterProfile @relation(fields: [supporterId], references: [id], onDelete: Cascade)
+  serviceId   String
+  service     Service          @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now())
+
+  @@unique([supporterId, serviceId])
+}
+
+model Availability {
+  id          String           @id @default(uuid())
+  supporterId String
+  supporter   SupporterProfile @relation(fields: [supporterId], references: [id], onDelete: Cascade)
+  dayOfWeek   Int              // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  startTime   String           // e.g. "09:00"
+  endTime     String           // e.g. "17:00"
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model AvailabilityException {
+  id          String           @id @default(uuid())
+  supporterId String
+  supporter   SupporterProfile @relation(fields: [supporterId], references: [id], onDelete: Cascade)
+  date        DateTime
+  isAvailable Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+}
+
+model Booking {
+  id                String           @id @default(uuid())
+  memberId          String
+  member            MemberProfile    @relation("MemberBookings", fields: [memberId], references: [id])
+  supporterId       String
+  supporter         SupporterProfile @relation("SupporterBookings", fields: [supporterId], references: [id])
+  serviceId         String
+  service           Service          @relation(fields: [serviceId], references: [id])
+  mode              String           // IN_PERSON, VIDEO_CALL
+  status            String           @default("REQUESTED") 
+  // REQUESTED, ACCEPTED, DECLINED, EXPIRED, IN_PROGRESS, COMPLETED, CANCELLED_BY_MEMBER, CANCELLED_BY_SUPPORTER, DISPUTED
+  scheduledAt       DateTime
+  durationHours     Int              @default(1)
+  meetingLocation   String?
+  videoRoomId       String?
+  notes             String?
+  hourlyRate        Float            @default(399.0)
+  totalAmount       Float            @default(399.0)
+  platformFee       Float            @default(79.8) // 20%
+  supporterEarnings Float            @default(319.2)
+  checkInTime       DateTime?
+  checkOutTime      DateTime?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  refundAmount      Float?           @default(0.0)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  payments       Payment[]
+  refunds        Refund[]
+  review         Review?
+  conversation   Conversation?
+  sosAlerts      SosAlert[]
+  reports        Report[]
+}
+
+model Payment {
+  id                String    @id @default(uuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  bookingId         String?
+  booking           Booking?  @relation(fields: [bookingId], references: [id])
+  membershipId      String?
+  membership        Membership? @relation(fields: [membershipId], references: [id])
+  amount            Float
+  currency          String    @default("INR")
+  status            String    @default("COMPLETED") // PENDING, COMPLETED, FAILED, REFUNDED
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpaySignature String?
+  providerMode      String    @default("mock") // mock | live
+  createdAt         DateTime  @default(now())
+}
+
+model Refund {
+  id               String   @id @default(uuid())
+  bookingId        String
+  booking          Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount           Float
+  reason           String?
+  status           String   @default("COMPLETED") // PENDING, COMPLETED, FAILED
+  razorpayRefundId String?
+  createdAt        DateTime @default(now())
+}
+
+model Payout {
+  id          String           @id @default(uuid())
+  supporterId String
+  supporter   SupporterProfile @relation(fields: [supporterId], references: [id])
+  amount      Float
+  status      String           @default("PAID") // PENDING, PAID, FAILED
+  payoutRef   String?
+  createdAt   DateTime         @default(now())
+}
+
+model Membership {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       String   // MEMBER, SUPPORTER
+  amount     Float
+  validFrom  DateTime @default(now())
+  validUntil DateTime
+  status     String   @default("ACTIVE") // ACTIVE, EXPIRED, CANCELLED
+  createdAt  DateTime @default(now())
+
+  payments Payment[]
+}
+
+model Review {
+  id          String           @id @default(uuid())
+  bookingId   String           @unique
+  booking     Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      User             @relation("MemberReviews", fields: [memberId], references: [id])
+  supporterId String
+  supporter   SupporterProfile @relation("SupporterReviews", fields: [supporterId], references: [id])
+  rating      Int              // 1 to 5
+  comment     String?
+  createdAt   DateTime         @default(now())
+}
+
+model Conversation {
+  id          String           @id @default(uuid())
+  bookingId   String           @unique
+  booking     Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  memberId    String
+  member      MemberProfile    @relation("MemberConversations", fields: [memberId], references: [id])
+  supporterId String
+  supporter   SupporterProfile @relation("SupporterConversations", fields: [supporterId], references: [id])
+  createdAt   DateTime         @default(now())
+
+  messages Message[]
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  text           String
+  read           Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, BOOKING, SYSTEM, SAFETY
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Report {
+  id             String   @id @default(uuid())
+  reporterId     String
+  reporter       User     @relation("ReporterUser", fields: [reporterId], references: [id])
+  reportedUserId String
+  reportedUser   User     @relation("ReportedUser", fields: [reportedUserId], references: [id])
+  bookingId      String?
+  booking        Booking? @relation(fields: [bookingId], references: [id])
+  reason         String
+  status         String   @default("OPEN") // OPEN, UNDER_INVESTIGATION, RESOLVED, DISMISSED
+  resolution     String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model SosAlert {
+  id          String   @id @default(uuid())
+  bookingId   String
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  locationLat Float?
+  locationLng Float?
+  status      String   @default("TRIGGERED") // TRIGGERED, ACKNOWLEDGED, RESOLVED
+  createdAt   DateTime @default(now())
+}
+
+model ConsentRecord {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  consentType String   // TERMS_AND_PRIVACY, PLATONIC_AGREEMENT, DPDP_CONSENT
+  accepted    Boolean  @default(true)
+  timestamp   DateTime @default(now())
+  ipAddress   String?
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String
+  admin      User     @relation(fields: [adminId], references: [id])
+  action     String   // APPROVE_SUPPORTER, REJECT_SUPPORTER, SUSPEND_USER, REFUND_BOOKING, UPDATE_PRICING
+  targetType String   // USER, BOOKING, REGION_CONFIG
+  targetId   String
+  metadata   String?  // JSON string
+  createdAt  DateTime @default(now())
+}
+
+model OtpCode {
+  id        String   @id @default(uuid())
+  phone     String
+  code      String
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
